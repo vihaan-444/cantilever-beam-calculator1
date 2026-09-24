@@ -17,7 +17,7 @@ st.markdown("""
 ---
 **Group Details:**
 * **Group No:** 02
-* **Members:** Student A (Enrollment No: 001), Student B (Enrollment No: 002)
+* **Members:** vihaan gadhia (Enrollment No: 25012250610023), daksh patel (Enrollment No: 24012250610066),priyansh patel (Enrollment No: 25012250610023)
 ---
 """)
 
