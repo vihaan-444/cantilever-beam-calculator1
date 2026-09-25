@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 # Page Configuration
 st.set_page_config(
@@ -19,8 +20,8 @@ st.markdown("""
 * **Group No:** 02
 * **Members:** 
   * Vihaan Gadhia (Enrollment No: 25012250610023)
-  * Daksh Patel (Enrollment No: 24012250610066) 
-  * Priyansh Patel (Enrollment No: 25012250610019)
+  * Daksh Patel (Enrollment No: 24012250610066)
+  * Priyansh Patel ( Enrollment No: 25012250610019)
 ---
 """)
 
@@ -50,6 +51,7 @@ shape = st.sidebar.selectbox("Cross-Section Shape", ["Solid Rectangle", "Solid C
 
 I = 0.0
 Z = 0.0
+b_dim, h_dim = 0.05, 0.1  # Default dimensional bounding parameters for 3D render
 
 if shape == "Solid Rectangle":
     b_mm = st.sidebar.slider("Width b (mm)", 10.0, 300.0, 50.0)
@@ -59,6 +61,7 @@ if shape == "Solid Rectangle":
     
     I = (b * h**3) / 12.0
     Z = (b * h**2) / 6.0
+    b_dim, h_dim = b, h
 
 elif shape == "Solid Circular":
     d_mm = st.sidebar.slider("Diameter d (mm)", 10.0, 300.0, 50.0)
@@ -66,6 +69,7 @@ elif shape == "Solid Circular":
     
     I = (np.pi * d**4) / 64.0
     Z = (np.pi * d**3) / 32.0
+    b_dim, h_dim = d, d
 
 elif shape == "I-Section":
     B_mm = st.sidebar.slider("Flange Width B (mm)", 20.0, 400.0, 100.0)
@@ -81,6 +85,7 @@ elif shape == "I-Section":
     B, H, tf, tw = B_mm/1000, H_mm/1000, tf_mm/1000, tw_mm/1000
     I = (B * H**3 - (B - tw)*(H - 2*tf)**3) / 12.0
     Z = I / (H / 2.0)
+    b_dim, h_dim = B, H
 
 # Main Screen Calculations
 M_max = P * L                   # N·m
@@ -107,9 +112,130 @@ else:
     st.success(f"✅ **DESIGN SAFE!**\n\nMaximum bending stress ({sigma_max_MPa:.2f} MPa) is within the yield limit of {selected_material} ({sy_MPa:.2f} MPa).")
 
 st.markdown("---")
+
+# ---------------------------------------------------------
+# 🧊 Animated 3D Beam Deflection Simulation (Plotly)
+# ---------------------------------------------------------
+st.subheader("🧊 3D Animated Beam Deformation Model")
+
+# Base coordinates
+x_3d = np.linspace(0, L, 100)
+deflection_m = (P * (x_3d**3 - 3*L*x_3d**2 + 2*L**3)) / (6 * E * I)
+v_m = -deflection_m + deflection_m[0]  # Deflection profile
+
+# Exaggeration scaling factor
+scale_factor = (0.2 * L) / (np.max(np.abs(v_m)) if np.max(np.abs(v_m)) > 0 else 1.0)
+v_3d_scaled = v_m * scale_factor
+
+# Create frames for loading/unloading animation cycle
+num_frames = 20
+frames = []
+t_steps = np.sin(np.linspace(0, np.pi, num_frames))  # Smooth oscillation factor
+
+for i, factor in enumerate(t_steps):
+    v_frame = v_3d_scaled * factor
+    frames.append(
+        go.Frame(
+            data=[
+                go.Scatter3d(
+                    x=x_3d,
+                    y=np.zeros_like(x_3d),
+                    z=v_frame,
+                    mode='lines',
+                    line=dict(
+                        color=np.abs(v_m * factor)*1000,
+                        colorscale='Viridis',
+                        width=8,
+                        cmin=0,
+                        cmax=np.max(np.abs(v_m))*1000 if np.max(np.abs(v_m)) > 0 else 1
+                    )
+                ),
+                go.Cone(
+                    x=[L], y=[0], z=[v_frame[-1] + 0.15*L],
+                    u=[0], v=[0], w=[-0.15*L * factor],
+                    sizemode="absolute", sizeref=0.15*L,
+                    colorscale=[[0, 'red'], [1, 'red']], showscale=False
+                )
+            ],
+            name=f"frame_{i}"
+        )
+    )
+
+fig_3d = go.Figure(
+    data=[
+        # Wall support
+        go.Mesh3d(
+            x=[0, 0, 0, 0], 
+            y=[-b_dim*1.5, b_dim*1.5, b_dim*1.5, -b_dim*1.5], 
+            z=[-h_dim*1.5, -h_dim*1.5, h_dim*1.5, h_dim*1.5],
+            color='gray', opacity=0.5, name='Fixed Support', showscale=False
+        ),
+        # Undeformed Centerline
+        go.Scatter3d(
+            x=[0, L], y=[0, 0], z=[0, 0],
+            mode='lines', line=dict(color='black', width=4, dash='dash'),
+            name='Undeformed Centerline'
+        ),
+        # Initial Deflected Profile (Frame 0)
+        go.Scatter3d(
+            x=x_3d, y=np.zeros_like(x_3d), z=v_3d_scaled * t_steps[0],
+            mode='lines',
+            line=dict(
+                color=np.abs(v_m * t_steps[0])*1000,
+                colorscale='Viridis',
+                width=8,
+                colorbar=dict(title="Deflection (mm)")
+            ),
+            name='Deflected Beam'
+        ),
+        # Load Arrow (Frame 0)
+        go.Cone(
+            x=[L], y=[0], z=[v_3d_scaled[0] + 0.15*L],
+            u=[0], v=[0], w=[0],
+            sizemode="absolute", sizeref=0.15*L,
+            colorscale=[[0, 'red'], [1, 'red']], showscale=False,
+            name='Applied Load P'
+        )
+    ],
+    frames=frames
+)
+
+# Add Play/Pause Animation Controls
+fig_3d.update_layout(
+    updatemenus=[dict(
+        type="buttons",
+        showactive=False,
+        x=0.05, y=1.1,
+        buttons=[
+            dict(label="▶ Play Animation",
+                 method="animate",
+                 args=[None, {"frame": {"duration": 50, "redraw": True}, "fromcurrent": True, "loop": True}]),
+            dict(label="⏸ Pause",
+                 method="animate",
+                 args=[[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"}])
+        ]
+    )],
+    scene=dict(
+        xaxis_title="Length X (m)",
+        yaxis_title="Width Y (m)",
+        zaxis_title="Deflection Z (m)",
+        aspectratio=dict(x=3, y=1, z=1),
+        camera=dict(eye=dict(x=1.8, y=1.8, z=1.2))
+    ),
+    margin=dict(l=0, r=0, b=0, t=30),
+    height=550
+)
+
+st.plotly_chart(fig_3d, use_container_width=True)
+st.caption("▶ Click **Play Animation** above to view the cyclic loading video-like animation.")
+
+st.markdown("---")
+
+# ---------------------------------------------------------
+# 📈 2D Curves (SFD, BMD, Deflection)
+# ---------------------------------------------------------
 st.subheader("📈 Shear Force, Bending Moment & Deflection Diagrams")
 
-# Plotting Curves along the Beam
 x = np.linspace(0, L, 200)
 shear_force = np.ones_like(x) * P_kN            # constant V = P
 bending_moment = P_kN * (L - x)                 # M(x) = P*(L-x) in kN·m
@@ -141,3 +267,4 @@ ax3.grid(True, linestyle="--", alpha=0.6)
 
 plt.tight_layout()
 st.pyplot(fig)
+
